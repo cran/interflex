@@ -1,5 +1,5 @@
-71d72c14bb0aaa3217b4cb5af96c78eb *DESCRIPTION
-9bc5276216dd7f901097d0d12b06aff9 *NAMESPACE
+fc1b1118e7296976d08fc5fd08ccdb69 *DESCRIPTION
+564d0d14bae1769e1949884f704ee09d *NAMESPACE
 c16810d47e46927e887459e1a67d0bf3 *R/RcppExports.R
 4f244a832aeaca69197a783265394a70 *R/interflex.R
 863bf48a743783908448026042723773 *README.md
@@ -8,6 +8,7 @@ c16810d47e46927e887459e1a67d0bf3 *R/RcppExports.R
 bad70ef2cb58a1f6241acbcc30273cab *man/inter.gam.Rd
 561d556f32c04967c626347fab6dfb2d *man/inter.kernel.Rd
 3a31c69d928b1605ff467700fbfd5c5a *man/inter.raw.Rd
+6aa2f10ec6ab42cc4207228ad90072a8 *man/interflex-internal.Rd
 faa77465cadbd73a058a8843493c1ce1 *man/interflex-package.Rd
 c637519015a5c749f29b9f055e5f7e0f *man/s1.Rd
 c18de3346e203919d7a3b4f76a85e390 *man/s2.Rd
@@ -17,4 +18,4 @@ c18de3346e203919d7a3b4f76a85e390 *man/s2.Rd
 8d46d69896a1f1d31ed76035a0e49d67 *src/Makevars.win
 76d8bcc9c69a7f93282f4d3e0026bd56 *src/RcppExports.cpp
 3e61e15e2bed4e1e9d837ae939223713 *src/fastplm.cpp
-3d64c1f17d9e200fad802474fe01220a *src/interflex_init.c
+9fe4d1682ecf1e614bcdc4a7e8bb0694 *src/interflex_init.c
