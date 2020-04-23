@@ -1,0 +1,1808 @@
+inter.linear<-function(data,
+                            Y, # outcome
+                            D, # treatment indicator
+                            X, # moderator
+                            treat.type = NULL, #discrete or continuous
+                            base = NULL, # base group when treatments are discrete
+                            Z = NULL, # covariates
+                            FE = NULL, # fixed effects
+                            weights = NULL, # weighting variable
+                            full.moderate = TRUE, # whether use fully moderated model
+                            na.rm = FALSE,
+                            Xunif = FALSE,
+							CI = TRUE,
+                            vartype = "robust", # variance type
+                            ##  "homoscedastic" (default); "robust"; "cluster", "pcse", "bootstrap"
+							nboots = 200,
+							parallel = TRUE,
+							cores = 4,
+                            cl = NULL, # variable to be clustered on
+                            time = NULL, # time variable for pcse
+                            pairwise = TRUE, # pcse option
+                            predict = FALSE,
+							D.ref = NULL,
+							figure = TRUE,
+                            order = NULL,
+                            subtitles = NULL,
+                            show.subtitles = NULL,
+                            Xdistr = "histogram", # c("density","histogram","none")
+                            main = NULL,
+                            Ylabel = NULL,
+                            Dlabel = NULL,
+                            Xlabel = NULL,
+                            xlab = NULL,
+                            ylab = NULL,
+                            xlim = NULL,
+                            ylim = NULL,
+                            theme.bw = FALSE,
+                            show.grid = TRUE,
+                            cex.main = NULL,
+                            cex.sub = NULL,
+                            cex.lab = NULL,
+                            cex.axis = NULL,                       
+                            interval = NULL,
+                            file = NULL,
+                            ncols = NULL,
+                            pool = FALSE,
+							color = NULL,
+							legend.title = NULL,
+							diff.values = NULL,
+							percentile = FALSE
+){
+  x <- NULL
+  y <- NULL
+  xmin <- NULL
+  xmax <- NULL
+  ymin <- NULL
+  ymax <- NULL
+  
+  
+  if(TRUE){ #INPUT CHECK
+  
+  ## in case data is in tibble format
+  if (is.data.frame(data) == FALSE) {
+    data <- as.data.frame(data)
+  }
+  n<-dim(data)[1]
+  ## Y
+  if (is.character(Y) == FALSE) {
+    stop("\"Y\" is not a string.")
+  } else {
+    Y <- Y[1]
+  }
+  ## D
+  if (is.character(D) == FALSE) {
+    stop("\"D\" is not a string.")
+  } else {
+    D <- D[1]
+  }
+  ## X
+  if (is.character(X) == FALSE) {
+    stop("\"X\" is not a string.")
+  } else {
+    X <- X[1]
+  }
+  ## Z
+  if (is.null(Z) == FALSE) {
+    for (i in 1:length(Z)) {
+      if (is.character(Z[i]) == FALSE) {
+        stop("Some element in \"Z\" is not a string.")
+      }
+    }
+  }
+  ## FE
+  if (is.null(FE) == FALSE) {
+    requireNamespace("lfe")
+    for (i in 1:length(FE)) {
+      if (is.character(FE[i]) == FALSE) {
+        stop("Some element in \"FE\" is not a string.")
+      }
+    }
+    if (vartype == "pcse") {
+      vartype <- "cluster"
+      warning("Fixed-effect models do not allow panel corrected standard errors; changed to clustered standard errors.")
+    }
+  }
+  ## weights
+  if (is.null(weights) == FALSE) {
+    if (is.character(weights) == FALSE) {
+      stop("\"weights\" is not a string.")
+    } else {
+      dataweights <- data[,weights]
+    }   
+  }
+  ## full moderate model
+  if (is.logical(full.moderate) == FALSE & is.numeric(full.moderate)==FALSE) {
+    stop("\"full.moderate\" is not a logical flag.")
+  }else{
+    full <- full.moderate
+  }
+  ## na.rm
+  if (is.logical(na.rm) == FALSE & is.numeric(na.rm)==FALSE) {
+    stop("\"na.rm\" is not a logical flag.")
+  }
+
+  
+  ## Xunif
+  if (is.logical(Xunif) == FALSE & is.numeric(Xunif)==FALSE) {
+    stop("\"Xunif\" is not a logical flag.")
+  }
+  ## CI
+  if (is.logical(CI) == FALSE & is.numeric(CI)==FALSE) {
+    stop("\"CI\" is not a logical flag.")
+  }
+  ## vartype
+  if (is.null(vartype)==TRUE) {
+    vartype <- "homoscedastic"
+  }
+  if (!vartype %in% c("homoscedastic","robust","cluster","pcse","bootstrap")){
+    stop("\"vartype\" must be one of the following: \"homoscedastic\",\"robust\",\"cluster\",\"pcse\",\"bootstrap\".")
+  } 
+  if (vartype == "cluster") {
+    if (is.null(cl)==TRUE) {
+      stop("\"cl\" not specified; set cl = \"varname\".")
+    }
+  } 
+  if (vartype == "pcse") {
+    if (is.null(cl)==TRUE | is.null(time)==TRUE) {
+      stop("\"cl\" or \"time\" not specified; set cl = \"varname1\", time = \"varname2\".")
+    }
+  }
+  
+  #nboots
+  if (is.null(nboots) == FALSE) {
+    if (is.numeric(nboots)==FALSE) {
+      stop("\"nboots\" is not a positive integer.")
+    } else {
+      nboots <- nboots[1]
+      if (nboots%%1 != 0 | nboots < 1) {
+        stop("\"nboots\" is not a positive number.")
+      }
+    } 
+  }else{nboots <- 200}
+  
+  # Parallel
+  if (is.logical(parallel) == FALSE & is.numeric(parallel)==FALSE) {
+    stop("\"parallel\" is not a logical flag.")
+  }
+  
+  # Cores
+  if (is.numeric(cores)==FALSE) {
+    stop("\"cores\" is not a positive integer.")
+  } else {
+    cores <- cores[1]
+    if (cores%%1!= 0 | cores<=0) {
+      stop("\"cores\" is not a positive integer.")
+    }
+  }
+  
+  # cl
+  if (is.null(cl)==FALSE) {
+    if (is.character(cl) == FALSE) {
+      stop("\"cl\" is not a string.")
+    } else {
+      cl <- cl[1]
+      if (vartype != "pcse" & vartype != "bootstrap") {
+        vartype <- "cluster"
+      }
+    }
+  }
+  
+  # time
+  if (is.null(time)==FALSE) {
+    if (is.character(time) == FALSE) {
+      stop("\"time\" is not a string.")
+    } else {
+      time <- time[1]
+    }
+  }
+  
+  ## check missing values
+  vars <- c(Y, D, X, Z, FE, cl,time, weights)
+  if (na.rm == TRUE) {        
+    data <- na.omit(data[,vars])
+  } else {
+    if (sum(is.na(data[,vars]))>0) {
+      stop("Missing values. Try option na.rm = TRUE\n")
+    }
+  }
+  
+  #pairwise
+  if (is.logical(pairwise) == FALSE & is.numeric(pairwise)==FALSE) {
+    stop("\"pairwise\" is not a logical flag.")
+  }
+
+  # predict
+  if (is.logical(predict) == FALSE & is.numeric(predict)==FALSE) {
+    stop("\"predict\" is not a logical flag.")
+  }
+
+  # D.ref
+  if(is.null(D.ref)==FALSE){
+	if(is.numeric(D.ref)==FALSE){
+      stop("\"D.ref\" is not a numeric variable.")
+    }
+	if(length(D.ref)>9){
+	  stop("Too many values in \"D.ref\".")
+	}
+  }
+  
+  # figure
+  if (is.logical(figure) == FALSE & is.numeric(figure)==FALSE) {
+    stop("\"figure\" is not a logical flag.")
+  }
+  
+  # show.subtitles
+  if(is.null(show.subtitles)==FALSE){
+	if (is.logical(show.subtitles) == FALSE & is.numeric(show.subtitles)==FALSE) {
+		stop("\"show.subtitles\" is not a logical flag.")
+	}
+  }
+  
+  # Xdistr
+  if (!Xdistr %in% c("hist","histogram","density","none")){
+    stop("\"Xdistr\" must be \"histogram\", \"density\", or \"none\".")
+  }
+  
+  #main
+  if (is.null(main)==FALSE) {
+    main <- as.character(main)[1]
+  }
+  #Ylabel
+  if (is.null(Ylabel)==TRUE) {
+    Ylabel <- Y
+  } else {
+    if (is.character(Ylabel) == FALSE) {
+      stop("\"Ylabel\" is not a string.")
+    } else {
+      Ylabel <- Ylabel[1]
+    }   
+  }
+  #Dlabel  
+  if (is.null(Dlabel)==TRUE) {
+    Dlabel <- D   
+  } else {
+    if (is.character(Dlabel) == FALSE) {
+      stop("\"Dlabel\" is not a string.")
+    } else {
+      Dlabel <- Dlabel[1]
+    }   
+  }
+  #Xlabel
+  if (is.null(Xlabel)==TRUE) {
+    Xlabel <- X   
+  } else {
+    if (is.character(Xlabel) == FALSE) {
+      stop("\"Xlabel\" is not a string.")
+    } else {
+      Xlabel <- Xlabel[1]
+    }   
+  }
+  ## axis labels
+  if(is.null(xlab)==FALSE){
+    if (is.character(xlab) == FALSE) {
+      stop("\"xlab\" is not a string.")
+    }        
+  }
+  if(is.null(ylab)==FALSE){
+    if (is.character(ylab) == FALSE) {
+      stop("\"ylab\" is not a string.")
+    }        
+  }
+
+  ## xlim ylim
+  if (is.null(xlim)==FALSE) {
+    if (is.numeric(xlim)==FALSE) {
+      stop("Some element in \"xlim\" is not numeric.")
+    } else {
+      if (length(xlim)!=2) {
+        stop("\"xlim\" must be of length 2.")
+      }
+    }
+  }
+  if (is.null(ylim)==FALSE) {
+    if (is.numeric(ylim)==FALSE) {
+      stop("Some element in \"ylim\" is not numeric.")
+    } else {
+      if (length(ylim)!=2) {
+        stop("\"ylim\" must be of length 2.")
+      }
+    }
+  }
+  
+  ## theme.bw
+  if (is.logical(theme.bw) == FALSE & is.numeric(theme.bw)==FALSE) {
+    stop("\"theme.bw\" is not a logical flag.")
+  }
+  
+  ## show.grid
+  if (is.logical(show.grid) == FALSE & is.numeric(show.grid)==FALSE) {
+    stop("\"show.grid\" is not a logical flag.")
+  }
+  
+  ## font size
+  if (is.null(cex.main)==FALSE) {
+    if (is.numeric(cex.main)==FALSE) {
+      stop("\"cex.main\" is not numeric.")
+    }
+  }
+  if (is.null(cex.sub)==FALSE) {
+    if (is.numeric(cex.sub)==FALSE) {
+      stop("\"cex.sub\" is not numeric.")
+    }
+  }
+  if (is.null(cex.lab)==FALSE) {
+    if (is.numeric(cex.lab)==FALSE) {
+      stop("\"cex.lab\" is not numeric.")
+    }
+  }
+  if (is.null(cex.axis)==FALSE) {
+    if (is.numeric(cex.axis)==FALSE) {
+      stop("\"cex.axis\" is not numeric.")
+    }    
+  }
+  
+  # interval
+  if (is.null(interval)==FALSE) {
+	if (is.numeric(interval)==FALSE) {
+      stop("Some element in \"interval\" is not numeric.")
+    } 
+  }
+  
+  # file
+  if (is.null(file)==FALSE) {
+	if (is.character(file)==FALSE) {
+      stop("Wrong file name.")
+    } 
+  }
+  
+  # ncols
+  if (is.null(ncols) == FALSE) {
+    if (is.numeric(ncols)==FALSE) {
+      stop("\"ncols\" is not a positive integer.")
+    } else {
+      ncols <- ncols[1]
+      if (ncols%%1 != 0 | ncols < 1) {
+        stop("\"ncols\" is not a positive number.")
+      }
+    } 
+  }
+  
+  ## pool
+  if (is.logical(pool) == FALSE & is.numeric(pool)==FALSE) {
+    stop("\"pool\" is not a logical flag.")
+  }
+  
+  ## color
+  if(is.null(color)==FALSE){
+	color <- as.character(color)
+	color.in <- c()
+	for(char in color){
+		res <- try(col2rgb(char),silent=TRUE)
+		if(!"try-error"%in%class(res)){
+			color.in <- c(color.in,char)
+		}else{stop(paste0(char," is not one name for a color.\n"))}
+	}
+	color <- color.in
+  }
+  
+  ## legend.title
+  if (is.null(legend.title)==FALSE) {
+    legend.title <- as.character(legend.title)[1]
+  }
+  
+  ## diff.values
+  if(is.null(diff.values)==FALSE){
+	if(is.numeric(diff.values)==FALSE){
+		stop("\"diff.values\" is not numeric.")
+	}
+	if(length(diff.values)!=3 & length(diff.values)!=2){
+		stop("\"diff.values\" must be of length 3 or 2.")
+	}
+	if(Xunif==FALSE){
+		min.XX <- min(data[,X])
+		max.XX <- max(data[,X])
+		for(a in diff.values){
+			if(a<min.XX|a>max.XX){
+				stop("Elements in \"diff.values\" should be within the range of the moderator.")
+			}
+		}
+	}
+	else{
+		for(a in diff.values){
+			if(a<0|a>100){
+				stop("Elements in \"diff.values\" should be within the range of 0 to 100 when Xunif is TRUE.")
+			}
+		}
+	}
+  }
+  
+  ## percentile
+  if(is.logical(percentile) == FALSE & is.numeric(percentile)==FALSE) {
+		stop("\"percentile\" is not a logical flag.")
+  }
+  
+  if(percentile==TRUE){
+		for(a in diff.values){
+			if(a<0|a>1){
+				stop("Elements in \"diff.values\" should be between 0 and 1 when percentile==TRUE.")
+			}
+		}
+  }
+  
+  
+}
+
+  if(TRUE){ #TREAT SETTING
+    
+  if(is.null(treat.type)==TRUE){
+    if(is.numeric(data[,D])==TRUE){
+      if(length(unique(data[,D]))>5){
+        treat.type <- 'continuous'
+      }
+      else{
+        treat.type <- 'discrete'
+      }
+    }
+    else{
+      treat.type <- 'discrete'
+    }
+  }
+  
+  if (!treat.type %in% c("discrete","continuous") ){
+    stop("\"treat.type\" must be one of the following: \"discrete\",\"continuous\".")
+  }
+  
+  #if treat is discrete
+  if (treat.type=='discrete') {
+  
+    if(length(unique(data[,D]))>9) {
+      stop("Too many kinds of treatment arms")
+    }
+    
+    data[,D] <- as.character(data[,D])
+    
+    
+    if(is.null(base)==TRUE) {
+      base=sort(unique(data[,D]))[1]
+      f=sprintf("Baseline group not specified; choose treat = %s as the baseline group. \n",base)
+      cat(f)
+    }
+    else {
+      base <- as.character(base)
+      if (!base %in% unique(data[,D])){
+        stop("\"base\" must be one kind of treatments.")
+      }
+      f=sprintf("Baseline group: treat = %s \n",base)
+      cat(f)
+    }
+    
+	## in case there are special characters in D
+    all.treat=sort(unique(data[,D]))
+	names(all.treat) <- paste("Group",c(1:length(all.treat)),sep  = '.')
+    other.treat <- all.treat[which(all.treat!=base)]
+    other.treat <- sort(other.treat)
+    
+    if(is.null(order)==FALSE){
+	  order <- as.character(order)
+	  
+	  if(length(order)!=length(unique(order))){
+        stop("\"order\" should not contain repeated values.")
+      }
+	  
+      if(length(order)!=length(other.treat)){
+        stop("\"order\" should include all kinds of treatment arms except for the baseline group.")
+	  }
+
+      if(sum(!is.element(order,other.treat))!=0 | sum(!is.element(other.treat,order))!=0){
+        stop("\"order\" should include all kinds of treatment arms except for the baseline group.")
+	  }
+      other.treat <- order
+	  colnames.p <- c()
+	  for(char in other.treat){
+		colnames.p <- c(colnames.p,names(all.treat[which(all.treat==char)]))
+	  }
+	  names(other.treat) <- colnames.p
+	}
+	
+	all.treat.origin <- all.treat
+	other.treat.origin <- other.treat
+	base.origin <- base
+	for(char in names(all.treat)){
+		data[which(data[,D]==all.treat[char]),D] <- char
+	}
+
+	all.treat <- names(all.treat.origin)
+	other.treat <- names(other.treat.origin)
+	base <- names(all.treat.origin[which(all.treat.origin==base.origin)])
+	names(all.treat) <- all.treat.origin
+	names(other.treat) <- other.treat.origin
+	
+
+	
+    if(is.null(subtitles)==FALSE){
+      if(length(subtitles)!=length(other.treat)){
+        stop("The number of elements in \"subtitles\" should be m-1(m is the number of different treatment arms).")
+      }
+    }
+	
+    if (is.logical(show.subtitles) ==FALSE & is.numeric(show.subtitles)==FALSE & is.null(show.subtitles)==FALSE) {
+      stop("\"show.subtitles\" is not a logical flag.")
+    } 
+  }
+  
+  if (treat.type=='continuous') {
+    if (is.numeric(data[,D])==FALSE) {
+      stop("\"D\" is not a numeric variable")
+    }
+	if(is.null(D.ref)==TRUE){
+    D.sample <- quantile(data[,D],probs = c(0.25,0.5,0.75),na.rm=T)
+	all.treat <- names(D.sample)
+    ntreat <- length(D.sample)
+    labelname <- c()
+    for (targetD in D.sample){
+      labelname <- c(labelname,paste0("D=",round(targetD,2)))
+    }
+    labelname <- paste0(labelname,' (',all.treat,')')
+	} else{
+	if (is.numeric(D.ref)==FALSE) {
+      stop("\"D.ref\" is not a numeric variable")
+    }
+	D.sample <- D.ref
+	labelname <- c()
+    for (targetD in D.sample){
+      labelname <- c(labelname,paste0("D=",round(targetD,2)))
+    }
+	names(D.sample) <- labelname
+	all.treat <- labelname
+    ntreat <- length(D.sample)
+	}
+  }
+  
+  # number of columns
+  if (is.null(ncols) == FALSE) {
+    if (ncols%%1 != 0) {
+      stop("\"ncols\" is not a positive integer.")
+    } else {
+      ncols <- ncols[1]
+    }
+    if (ncols < 1) {
+      stop("\"ncols\" is not a positive integer.")
+    }
+  } else{
+	if(treat.type=="discrete"){
+		ncols <- length(unique(data[,D]))-1
+	}
+	if(treat.type=="continuous"){
+		ncols <- 1
+	}
+  }
+}
+
+  if(TRUE){ #PREPROCESS
+  
+  #factor cov
+  to_dummy_var <- c()
+  for(a in Z){
+	if(is.factor(data[,a])==TRUE){
+		to_dummy_var <- c(to_dummy_var,a)
+	}	
+	if(is.character(data[,a])==TRUE){
+		stop("\"Z\" should be numeric or factorial.")
+	}
+  }
+  if(length(to_dummy_var)>0){
+	fnames <- paste("factor(", to_dummy_var, ")", sep = "")
+	contr.list <- list(contr.sum, contr.sum)
+	names(contr.list) <- fnames
+	to_dummy_form <- as.formula(paste("~", paste(fnames, collapse = " + ")))
+	suppressWarnings(
+	to_dummy_mat <- model.matrix(to_dummy_form, data = data,
+                          contrasts.arg = contr.list)[, -1]
+	)
+	to_dummy_mat <- as.matrix(to_dummy_mat)
+	dummy_colnames <- c()
+	for(i in 1:dim(to_dummy_mat)[2]){
+		dummy_colnames <- c(dummy_colnames,paste0("Dummy.Covariate.",i))
+	}
+	colnames(to_dummy_mat) <- dummy_colnames
+	data <- cbind(data,to_dummy_mat)
+	Z <- Z[!Z %in% to_dummy_var]
+	Z <- c(Z,dummy_colnames)
+  }
+  
+  
+  ## fully moderated model
+  if(full==TRUE){
+    cat("Use a fully moderated model.\n")
+    full_names <- names(data)
+    names_Z <- Z
+    for(char in Z){
+      fm_name <- paste0(X,"_",char)
+      names_Z <- c(names_Z,fm_name)
+      full_names <- c(full_names,fm_name)
+      data <- cbind(data,data[,X]*data[,char])
+    }
+    names(data) <- full_names
+    Z <- names_Z
+  }
+  ## fully moderated model END
+  
+  ## transform moderator into uniform
+  if (Xunif == TRUE) {
+    x <- data[, X]
+    data[, X] <- rank(x, ties.method = "average")/length(x)*100
+    Xlabel <- paste(Xlabel,"(Percentile)")
+  }
+  ## transform moderator into uniform END
+  
+  ## change fixed effect variable to factor
+  if (is.null(FE)==FALSE) {
+    if (length(FE) == 1) {
+      data[, FE] <- as.numeric(as.factor(data[, FE]))
+    } else {
+      data[, FE] <- sapply(data[,FE],function(vec){as.numeric(as.factor(vec))})
+    }
+  }
+  ## change fixed effect variable to factor END
+  
+  if(predict==FALSE){
+	est.pred.linear <- NULL
+  }
+  
+  if(is.null(diff.values)==TRUE){
+	diff.values.plot <- NULL
+	diff.values <- quantile(data[,X],probs = c(0.25,0.5,0.75))
+	difference.name <- c("50% vs 25%","75% vs 50%","75% vs 25%")
+  }
+  else{
+	if(percentile==TRUE){
+		diff.pc <- diff.values
+		diff.values <- quantile(data[,X],probs=diff.values)
+	}
+	diff.values.plot<-diff.values
+	
+	if(length(diff.values)==3){
+		if(percentile==FALSE){
+				difference.name <- c(paste0(round(diff.values[2],3)," vs ",round(diff.values[1],3)),
+								   paste0(round(diff.values[3],3)," vs ",round(diff.values[2],3)),
+								   paste0(round(diff.values[3],3)," vs ",round(diff.values[1],3)))
+		}
+		if(percentile==TRUE){
+				difference.name <- c(paste0(round(100*diff.pc[2],3),'%',' vs ',round(100*diff.pc[1],3),'%'),
+							   paste0(round(100*diff.pc[3],3),'%',' vs ',round(100*diff.pc[2],3),'%'),
+							   paste0(round(100*diff.pc[3],3),'%',' vs ',round(100*diff.pc[1],3),'%'))
+		}
+	}
+	if(length(diff.values)==2){
+		if(percentile==FALSE){
+				difference.name <- c(paste0(round(diff.values[2],3)," vs ",round(diff.values[1],3)))
+			}
+		if(percentile==TRUE){
+				difference.name <- c(paste0(round(100*diff.pc[2],3),'%',' vs ',round(100*diff.pc[1],3),'%'))
+			}
+	}
+  }
+  }
+  
+  cat("Use a linear interaction model\n")
+  
+  if(TRUE){ #LINEAR MODEL FORMULA
+	##  make a vector of the marginal effect of D on Y as X changes
+	##X.lvls<-as.numeric(quantile(data[,X], probs=seq(0,1,0.01)))
+	X.lvls <- seq(min(data[,X]), max(data[,X]), length.out = 50)
+	
+	## linear model formula
+	if (treat.type=="discrete") {
+		data[,D] <- as.factor(data[,D])
+		data[,D] <- relevel(data[,D], ref=base)
+	}
+	mod.f<-paste0(Y,"~",D,"+",X,"+",D,"*",X)
+	if (is.null(Z)==FALSE) {
+		mod.f <- paste0(mod.f, "+", paste0(Z,collapse="+"))
+	}
+	if (is.null(FE)==FALSE) {
+		mod.f <- paste0(mod.f, "|",paste0(FE, collapse = "+"))
+		if (vartype=="cluster") {
+			mod.f <- paste0(mod.f, "| 0 |",paste0(cl,collapse = "+"))
+		}
+	}
+	mod.f <- as.formula(mod.f)
+  }
+
+  if(vartype!='bootstrap'){ 
+	# if vartype!='bootstrap'
+	## estimate coefficients -> estimate covariance matrix 
+	## -> (predict==T) estimate expected value of Y 
+	## -> (predict==T) if there exists fixed effects, first demean Y with fixed effects when making prediction, consistent with the kernel model
+	## a naive fit
+	if (is.null(FE)==TRUE) { #OLS
+		if (is.null(weights)==TRUE) {
+			mod.naive<-lm(mod.f,data=data)
+		} else {
+			mod.naive<-lm(mod.f,data=data,weights=dataweights)
+		}
+	} else { # FE
+		if (is.null(weights)==TRUE) {
+			mod.naive<-felm(mod.f,data=data)
+		} else {
+			mod.naive<-felm(mod.f,data=data,weights=dataweights)
+		}
+	}
+  
+	## coefficients
+	coefs<-summary(mod.naive)$coefficients[,1]
+	coefs[which(is.na(coefs))] <- 0
+	if(treat.type=='continuous'){
+		coef.D<-coefs[D]
+		coef.X<-coefs[X]
+		coef.DX<-coefs[paste(D,X,sep=":")] #interaction
+	}
+  
+	if(treat.type=='discrete'){
+		coef_list <- list()
+		coef_inter_list <- list()
+		for(char in other.treat){
+			coef_list[[char]] <- coefs[paste0(D,char)]
+			coef_inter_list[[char]] <- coefs[paste(paste0(D,char),X,sep=":")]
+		}
+	}
+	
+
+	## variance    
+	if (is.null(FE)==TRUE) { #OLS
+	if (vartype=="homoscedastic") {
+			v<-vcov(mod.naive)
+    } else if (vartype=="robust") {
+			requireNamespace("sandwich")
+			v<-vcovHC(mod.naive,type="HC1") # White with small sample correction
+    } else if (vartype=="cluster") {
+      v<-vcovCluster(mod.naive,cluster = data[,cl])
+    } else if (vartype=="pcse") {
+      requireNamespace("pcse")
+      v<-pcse(mod.naive,groupN=data[,cl],groupT=data[,time],pairwise=pairwise)$vcov
+    }
+  } else { # FE
+    if (vartype=="homoscedastic") {
+      v<-vcov(mod.naive, type = "iid")
+    } else if (vartype=="robust") {
+      v<-vcov(mod.naive, type="robust") 
+    } else if (vartype=="cluster") {
+      v<-vcov(mod.naive, type = "cluster") 
+    }
+  }
+  v[which(is.na(v))] <- 0
+  ## get variance
+  if(treat.type=='continuous'){
+    if (vartype=="pcse") {
+      var.D<-v[D,D]
+      var.DX<-v[paste(D,X,sep="."),paste(D,X,sep=".")]
+      cov.DX<-v[D,paste(D,X,sep=".")]
+    } 
+    else {
+      var.D<-v[D,D]
+      var.DX<-v[paste(D,X,sep=":"),paste(D,X,sep=":")]
+      cov.DX<-v[D,paste(D,X,sep=":")]
+    }
+  }
+  
+  if(treat.type=='discrete'){
+	var_list <- list()
+	varinter_list <- list()
+	cov_list <- list()
+    if (vartype=="pcse") {
+      for(char in other.treat){
+		var_list[[char]] <- v[paste0(D,char),paste0(D,char)]
+		varinter_list[[char]] <- v[paste(paste0(D,char),X,sep="."),paste(paste0(D,char),X,sep=".")]
+		cov_list[[char]] <- v[paste0(D,char),paste(paste0(D,char),X,sep=".")]
+      }
+    } 
+    else {
+      for(char in other.treat){
+		var_list[[char]] <- v[paste0(D,char),paste0(D,char)]
+		varinter_list[[char]] <- v[paste(paste0(D,char),X,sep=":"),paste(paste0(D,char),X,sep=":")]
+		cov_list[[char]] <- v[paste0(D,char),paste(paste0(D,char),X,sep=":")]
+      }
+    }
+  }
+  
+  	if(is.null(diff.values)==FALSE){
+	
+		if(length(diff.values)==2){
+			x.diff.all <- diff.values[2]-diff.values[1]
+		}
+		if(length(diff.values)==3){
+			x.diff.all <- c(diff.values[2]-diff.values[1],diff.values[3]-diff.values[2],diff.values[3]-diff.values[1])
+		}
+
+		if(treat.type=='continuous'){
+		diff.table.start <- matrix(0,nrow=0,ncol=6)
+		colnames(diff.table.start) <- c("Diff", "Std.Err.", "z-score", "p-value", "CI_lower(95%)", "CI_upper(95%)")
+		for(x.diff in x.diff.all){
+			difference <- coef.DX*x.diff
+			difference.sd <- abs(x.diff)*sqrt(var.DX)
+			difference.z <- difference/difference.sd
+			difference.pvalue2sided=2*pnorm(-abs(difference.z))
+			difference.lbound <- difference-1.96*difference.sd
+			difference.ubound <- difference+1.96*difference.sd
+			diff.table <- round(c(difference,difference.sd,difference.z,difference.pvalue2sided,difference.lbound,difference.ubound),3)
+			diff.table.start <- rbind(diff.table.start,diff.table)
+		}
+		rownames(diff.table.start) <- difference.name
+		diff.table.start <- as.data.frame(diff.table.start)
+		for(col.name.table in colnames(diff.table.start)){
+			diff.table.start[,col.name.table] <- sprintf("%.3f", diff.table.start[,col.name.table])
+		}
+		diff.table <- diff.table.start
+		}
+		
+		if(treat.type=='discrete'){
+			diff.table.list <- list()
+			for(char in other.treat){
+				diff.table.start <- matrix(0,nrow=0,ncol=6)
+				colnames(diff.table.start) <- c("Diff", "Std.Err.", "z-score", "p-value", "CI_lower(95%)", "CI_upper(95%)")
+				for(x.diff in x.diff.all){
+					difference <- coef_inter_list[[char]]*x.diff
+					difference.sd <- abs(x.diff)*sqrt(varinter_list[[char]])
+					difference.z <- difference/difference.sd
+					difference.pvalue2sided=2*pnorm(-abs(difference.z))
+					difference.lbound <- difference-1.96*difference.sd
+					difference.ubound <- difference+1.96*difference.sd
+					diff.table <- round(c(difference,difference.sd,difference.z,difference.pvalue2sided,difference.lbound,difference.ubound),3)
+					diff.table.start <- rbind(diff.table.start,diff.table)
+				}
+				rownames(diff.table.start) <- difference.name
+				diff.table.start <- as.data.frame(diff.table.start)
+				for(col.name.table in colnames(diff.table.start)){
+					diff.table.start[,col.name.table] <- sprintf("%.3f", diff.table.start[,col.name.table])
+				}
+				diff.table.list[[other.treat.origin[char]]] <- diff.table.start
+			}
+			diff.table <- diff.table.list
+		}
+	} else{diff.table <- NULL}
+	
+	
+
+  
+  if (treat.type=='continuous'){
+    marg<-coef.D + coef.DX*X.lvls
+    marg[which(is.na(marg))] <- 0
+    ## the variance is var(B1_D) + X^2*var(B_3) + 2*inst*cov(D, X)
+    se<-sqrt(var.D +  X.lvls^2*var.DX + 2*X.lvls*cov.DX)
+    df<-mod.naive$df.residual
+    crit<-abs(qt(.025, df=df)) # critical values
+  
+    ##make 95% confidence bands. 
+    lb<-marg-crit*se
+    ub<-marg+crit*se
+    est.lin<-data.frame(X.lvls, marg,se, lb, ub)
+	
+	# var-cov matrix
+	gen_matrix <- function(colvec,x0){
+		output <- var.D + (x0+colvec)*cov.DX + x0*colvec*var.DX
+		return(output)
+	}
+	cov_matrix <- as.matrix(sapply(X.lvls,function(x0){gen_matrix(X.lvls,x0)}))
+	est.matrix <- cov_matrix
+  }
+  
+  if (treat.type=='discrete'){
+    df <- mod.naive$df.residual
+    crit<-abs(qt(.025, df=df))
+    est.lin<-list()
+    est.matrix<-list()
+	
+    for(char in other.treat) {
+	  marg <- coef_list[[char]] + coef_inter_list[[char]]*X.lvls
+	  marg[which(is.na(marg))] <- 0
+      se <- sqrt(var_list[[char]] + X.lvls^2*varinter_list[[char]]+2*X.lvls*cov_list[[char]])
+      lb <- marg-crit*se
+      ub <- marg+crit*se
+      tempest <- data.frame(X.lvls,marg,se,lb,ub)
+      tempest[,'Treatment']<- rep(other.treat.origin[char],dim(tempest)[1])
+      est.lin[[other.treat.origin[char]]] <- tempest
+	  
+	  # var-cov matrix
+	  gen_matrix <- function(colvec,x0){
+		output <- var_list[[char]] + (x0+colvec)*cov_list[[char]] + x0*colvec*varinter_list[[char]]
+		return(output)
+	  }
+	  cov_matrix <- as.matrix(sapply(X.lvls,function(x0){gen_matrix(X.lvls,x0)}))
+	  est.matrix[[other.treat.origin[char]]] <- cov_matrix
+	  
+    }
+  }
+
+	if(predict==TRUE){
+		data.old <- data
+		FE.old <- FE
+		if(is.null(FE)==FALSE){
+								data.touse <- as.matrix(data[,Y])
+								data.fe <- as.matrix(data[,FE])
+								if(is.null(weights)==FALSE){
+									w <- as.matrix(data[,weights])
+								}else{w <- rep(1,dim(data.touse)[1])}
+										fastplm_demean <- fastplm(data = data.touse, FE = data.fe,
+															  weight = w, FEcoefs = 0)
+								data[,Y] <- fastplm_demean$residuals
+								FE <- NULL
+		}
+	
+		data_predict <- data[,c(Y,X)]
+		predict_colname <- c(Y,X)
+		formula <- paste0(Y,"~",X)
+		if(treat.type=='discrete'){
+			for(char in other.treat){
+				data_predict <- cbind(data_predict,as.numeric(data[,D]==char))
+				predict_colname <- c(predict_colname,paste0("D.",char))
+				formula <- paste0(formula,"+",paste0("D.",char))
+			}
+			for(char in other.treat){
+				data_predict <- cbind(data_predict,as.numeric(data[,D]==char)*data[,X])
+				predict_colname <- c(predict_colname,paste0("DX.",char))
+				formula <- paste0(formula,"+",paste0("DX.",char))
+			}
+		}
+		if(treat.type=='continuous'){
+				data_predict <- cbind(data_predict,data[,D])
+				predict_colname <- c(predict_colname,D)
+				formula <- paste0(formula,"+",D)
+				data_predict <- cbind(data_predict,data[,D]*data[,X])
+				predict_colname <- c(predict_colname,"DX")
+				formula <- paste0(formula,"+","DX")
+		}
+		if(is.null(Z)==FALSE){
+			for(char in Z){
+				data_predict <- cbind(data_predict,data[,char])
+				predict_colname <- c(predict_colname,char)
+				formula <- paste0(formula,"+",char)
+			}
+		}
+		predict_colname0 <- predict_colname		
+		colnames(data_predict) <- predict_colname
+		formula <- as.formula(formula)
+		
+		if (is.null(FE)==TRUE) { #OLS
+			if (is.null(weights)==TRUE) {
+				mod.naive2<-lm(formula,data=data_predict)
+			} else {
+				mod.naive2<-lm(formula,data=data_predict,weights=dataweights)
+			}
+		} else { # FE
+			if (is.null(weights)==TRUE) {
+				mod.naive2<-felm(formula,data=data_predict)
+			} else {
+				mod.naive2<-felm(formula,data=data_predict,weights=dataweights)
+			}
+		}
+		
+
+		if (is.null(FE)==TRUE) { #OLS
+		  if (vartype=="homoscedastic") {
+				v<-vcov(mod.naive2)
+		} else if (vartype=="robust") {
+			requireNamespace("sandwich")
+			v<-vcovHC(mod.naive2,type="HC1") # White with small sample correction
+		} else if (vartype=="cluster") {
+			v<-vcovCluster(mod.naive2,cluster = data[,cl])
+		} else if (vartype=="pcse") {
+			requireNamespace("pcse")
+			v<-pcse(mod.naive2,groupN=data[,cl],groupT=data[,time],pairwise=pairwise)$vcov
+		}
+		} else { # FE
+			if (vartype=="homoscedastic") {
+				v<-vcov(mod.naive2, type = "iid")
+			} else if (vartype=="robust") {
+				v<-vcov(mod.naive2, type="robust") 
+			} else if (vartype=="cluster") {
+				v<-vcov(mod.naive2, type = "cluster") 
+		}
+		}
+		v[which(is.na(v))] <- 0 
+		coef2 <- as.matrix(coef(mod.naive2))
+		coef2[which(is.na(coef2))] <- 0
+		X.pred <- seq(min(data[,X]),max(data[,X]),length.out=length(X.lvls))
+		est.predict.linear <- list()
+		
+		for(char in all.treat){
+			newdata <- X.pred
+			if(treat.type=='discrete'){
+				for(char0 in other.treat){
+					newdata <- cbind(newdata,as.numeric(char0==char))
+				}
+				for(char0 in other.treat){
+					newdata <- cbind(newdata,as.numeric(char0==char)*X.pred)
+				}
+			}
+			if(treat.type=='continuous'){
+				newdata <- cbind(newdata,D.sample[char])
+				newdata <- cbind(newdata,D.sample[char]*X.pred)
+			}
+			
+			for(char0 in Z){
+				newdata <- cbind(newdata,mean(data[,char0]))
+			}
+			newdata <- cbind(1,newdata)
+			
+			newdata <- as.data.frame(newdata)
+
+			colnames(newdata) <- predict_colname0
+			m.mat <- model.matrix(mod.naive2$terms,data=newdata)
+			if(is.null(FE)==FALSE){
+				m.mat <- m.mat[,-1]
+			}
+			
+			fit <- as.vector(m.mat %*% coef2)
+			se.fit <- sqrt(diag(m.mat%*%v%*%t(m.mat)))
+			df2 <- mod.naive2$df
+			
+			CI.lvl <- c((1-0.95)/2, (1-(1-0.95)/2))
+			crit<-abs(qt(CI.lvl[1], df=df2))
+			lb<-fit-crit*se.fit
+			ub<-fit+crit*se.fit
+			if(treat.type=='discrete'){
+				est.predict.linear[[all.treat.origin[char]]] <- cbind.data.frame(X = X.pred, EY = fit, 
+                                           SE = se.fit ,Treatment=all.treat.origin[char],
+                                           CI_lower=lb, CI_upper=ub
+                                           )
+			}
+			if(treat.type=='continuous'){
+				est.predict.linear[[char]] <- cbind.data.frame(X = X.pred, EY = fit, 
+                                           SE = se.fit ,Treatment=char,
+                                           CI_lower=lb, CI_upper=ub
+                                           )
+			}
+		}
+		data <- data.old
+		FE <- FE.old
+	}
+}
+
+  if(vartype=='bootstrap'){
+	#if vartype=='bootstrap'
+	## generate a function that returns marginal effects and the degree of freedom.
+	## (predict==T) generate a function that returns predicted values of Y
+	## bootstrap
+	gen_marg <- function(data,Df=FALSE){
+		if(is.null(weights)==FALSE){
+			dataweights <- data[,weights]
+		}
+		
+		if (is.null(FE)==TRUE) { #OLS
+			if (is.null(weights)==TRUE) {
+				mod.naive<-lm(mod.f,data=data)
+			} 	else {
+				mod.naive<-lm(mod.f,data=data,weights=dataweights)
+			}
+		} else { # FE
+			if (is.null(weights)==TRUE) {
+				mod.naive<-felm(mod.f,data=data)
+			} else {
+				mod.naive<-felm(mod.f,data=data,weights=dataweights)
+			}
+		}
+		
+		## coefficients
+		coefs<-summary(mod.naive)$coefficients[,1]
+	
+		if(treat.type=='continuous'){
+			coef.D<-coefs[D]
+			coef.X<-coefs[X]
+			coef.DX<-coefs[paste(D,X,sep=":")] #interaction
+			marg<-coef.D + coef.DX*X.lvls
+			marg[which(is.na(marg))] <- 0
+		}	
+  
+		if(treat.type=='discrete'){
+			coef_list <- list()
+			coef_inter_list <- list()
+			marg_list <- list()
+			for(char in other.treat){
+				coef_list[[char]] <- coefs[paste0(D,char)]
+				coef_inter_list[[char]] <- coefs[paste(paste0(D,char),X,sep=":")]
+				temp_marg <- coef_list[[char]] + coef_inter_list[[char]]*X.lvls
+				temp_marg[which(is.na(temp_marg))] <- 0
+				marg_list[[char]] <- temp_marg
+			}
+			coef.DX <- coef_inter_list
+		}
+  
+		if(treat.type=='continuous'){
+			output <- matrix(NA,nrow=length(X.lvls),ncol=1)
+			output[,1] <- marg
+			colnames(output) <- c('ME')
+		}
+		if(treat.type=='discrete'){
+			output <- matrix(NA,nrow=length(X.lvls),ncol=length(other.treat))
+			k <- 1
+			output_colname <- c()
+			for(char in other.treat){
+				output[,k] <- marg_list[[char]]
+				output_colname <- c(output_colname,paste0("ME.",char))
+				k <- k + 1
+		}
+		colnames(output) <- output_colname
+	}
+ 
+		if(Df==FALSE){
+			return(output)
+		}
+		if(Df==TRUE) {
+			return(list(output=output,df=df,coef.inter=coef.DX))
+		}
+	}
+	
+	## a function that will return linear prediction
+	if(predict==TRUE){
+		data.demean <- data
+		if(is.null(FE)==FALSE){
+			data.touse <- as.matrix(data[,Y])
+			data.fe <- as.matrix(data[,FE])
+			if(is.null(weights)==FALSE){
+				w <- as.matrix(data[,weights])
+			}else{w <- rep(1,dim(data.touse)[1])}
+			fastplm_demean <- fastplm(data = data.touse, FE = data.fe,
+									  weight = w, FEcoefs = 0)
+			data.demean[,Y] <- fastplm_demean$residuals
+		}
+		
+		if(treat.type=='continuous'){
+			gen_Ey_linear <- function(data,Y,D,X,FE,weights,Z=NULL,X.pred){
+								n<-dim(data)[1]
+								data_touse <- data
+								if(is.null(weights)==FALSE){
+									weight_touse <- as.matrix(data[,weights])
+								}
+								else{
+									weight_touse <- as.matrix(rep(1,n))
+								}
+      
+								data1 <- as.data.frame(data_touse[,c(Y,X,D)])
+								data1 <- cbind(data1,data1[,X]*data1[,D])
+								colnames <- c("Y","X","D","D.X")
+								formula <- "Y ~ X + D + D.X"
+								for(char in Z){
+									data1 <- cbind(data1,data_touse[,char])
+									colnames <- c(colnames,char)
+									formula <- paste(formula,char,sep = "+")
+								}
+								
+								if (is.null(FE)==FALSE) {
+										formula <- paste0(formula, "|",paste0(FE, collapse = "+"))
+										data1 <- cbind(data1,data_touse[,FE])
+										colnames <- c(colnames,FE)
+								}
+								colnames(data1) <- colnames
+								formula <- as.formula(formula)
+								# coef
+								if(is.null(FE)==TRUE){
+										naive_linearfit <- lm(formula=formula,data=data1,weights = weight_touse)
+									}
+								if(is.null(FE)==FALSE){
+										suppressWarnings(naive_linearfit <- felm(formula=formula,data=data1,weights = weight_touse))
+									}
+								
+								naive.coef <- naive_linearfit$coefficients
+								naive.coef[which(is.na(naive.coef))] <- 0
+								naive.coef <- as.matrix(naive.coef)
+
+								# predict
+								x_predict <- X.pred
+								npred <- length(X.pred)
+								data_predict_start <- matrix(rep(1,npred))
+								data_predict_start <- cbind(data_predict_start,x_predict)
+								Ey_all <- matrix(NA,nrow=npred,ncol=0)
+								for(target.D in D.sample){
+									data_predict <- data_predict_start
+									data_predict <- cbind(data_predict,rep(target.D,npred))
+									data_predict <- cbind(data_predict,target.D*x_predict)
+								for(char in Z){
+									data_predict <- cbind(data_predict,mean(data1[,char]))
+								}
+								output <- as.double(data_predict%*%naive.coef)
+								Ey_all <- cbind(Ey_all,output)
+								}
+								colnames(Ey_all) <- names(D.sample)
+								return(Ey_all)
+			}
+		}
+		
+		if(treat.type=='discrete'){
+			ntreat <- length(all.treat)
+			gen_Ey_linear <- function(data,Y,D,X,FE,weights,Z=NULL,X.pred){
+									  n<-dim(data)[1]
+									  all.treat.new <- sort(unique(data[,D]))
+									  if(length(all.treat.new)<ntreat){ # in case some kinds of treatments are not in bootstrap samples
+											return(matrix(NA,nrow=npred,ncol=0))
+									  }
+									  
+									if(is.null(FE)==FALSE){
+									data.touse <- as.matrix(data[,Y])
+									data.fe <- as.matrix(data[,FE])
+									if(is.null(weights)==FALSE){
+										w <- as.matrix(data[,weights])
+									}else{w <- rep(1,dim(data.touse)[1])}
+									fastplm_demean <- fastplm(data = data.touse, FE = data.fe,
+															  weight = w, FEcoefs = 0)
+									data[,Y] <- fastplm_demean$residuals
+									FE <- NULL
+									}
+									  
+
+									  data_touse <- data
+									  if(is.null(weights)==FALSE){
+											weight_touse <- as.matrix(data[,weights])
+									  }
+									  else{
+											weight_touse <- as.matrix(rep(1,n))
+									  }
+           
+									  data1 <- as.data.frame(data_touse[,c(Y,X)])
+									  colnames <- c("Y","X")
+								      formula <- "Y ~ X"
+									  for(char in Z){
+										data1 <- cbind(data1,data_touse[,char])
+										colnames <- c(colnames,char)
+										formula <- paste(formula,char,sep = "+")
+									  }
+									  for(char in other.treat){
+										data1 <- cbind(data1,as.numeric(data_touse[,D]==char))
+										colnames <- c(colnames,paste0("D.",char))
+										formula <- paste(formula,paste0("D.",char),sep = "+")
+									  }
+									  for(char in other.treat){
+										data1 <- cbind(data1,data_touse[,X]*as.numeric(data_touse[,D]==char))
+										colnames <- c(colnames,paste0("DX.",char))
+										formula <- paste(formula,paste0("DX.",char),sep = "+")
+									  }
+									  
+									  if (is.null(FE)==FALSE) {
+											formula <- paste0(formula, "|",paste0(FE, collapse = "+"))
+											data1 <- cbind(data1,data_touse[,FE])
+											colnames <- c(colnames,FE)
+										}
+									  colnames(data1) <- colnames
+									  formula <- as.formula(formula)
+									  #coef
+									  if(is.null(FE)==TRUE){
+										naive_linearfit <- lm(formula=formula,data=data1,weights = weight_touse)
+									  }
+									  if(is.null(FE)==FALSE){
+										suppressWarnings(naive_linearfit <- felm(formula=formula,data=data1,weights = weight_touse))
+									  }
+									  naive.coef <- naive_linearfit$coefficients
+								      naive.coef[which(is.na(naive.coef))] <- 0
+									  naive.coef <- as.matrix(naive.coef)
+
+									  x_predict <- X.pred
+									  npred <- length(X.pred)
+									  data_predict_start <- matrix(rep(1,npred))
+									  data_predict_start <- cbind(data_predict_start,x_predict)								  
+									  for (char in Z){
+										data_predict_start <- cbind(data_predict_start,mean(data1[,char]))
+									  }
+      
+									  Ey_all <- matrix(NA,nrow=npred,ncol=0)
+      
+									  for(target_treat in all.treat){
+										data_predict <- data_predict_start
+										for (char in other.treat){
+											if(char==target_treat){
+												data_predict <- cbind(data_predict,rep(1,npred))
+											}
+											else{
+												data_predict <- cbind(data_predict,rep(0,npred))
+											}
+										}
+									  for (char in other.treat){
+										if(char==target_treat){
+											data_predict <- cbind(data_predict,rep(1,npred)*x_predict)
+										}
+										else{
+											data_predict <- cbind(data_predict,rep(0,npred))
+										}
+									  }
+									  output <- as.double(data_predict%*%naive.coef)
+								      Ey_all <- cbind(Ey_all,output)
+									  }
+									  colnames(Ey_all) <- all.treat
+									  return(Ey_all)
+									  }
+		}
+	
+		X.pred <- seq(min(data[,X]),max(data[,X]),length.out=length(X.lvls))
+		EY_output <- gen_Ey_linear(data=data.demean,Y=Y,D=D,X=X,FE=NULL,weights=weights,Z=Z,X.pred=X.pred)
+	}
+	
+	output.list <- gen_marg(data=data,Df=TRUE)
+	output <- output.list$output
+	df.X <- output.list$df
+	coef.inter.T <- output.list$coef.inter
+	
+	
+	if (is.null(cl)==FALSE) { ## find clusters
+      clusters<-unique(data[,cl])
+      id.list<-split(1:n,data[,cl])
+    }
+ 
+	one.boot <- function(){
+      if (is.null(cl)==TRUE) {
+        smp<-sample(1:n,n,replace=TRUE)
+      } else { ## block bootstrap
+        cluster.boot<-sample(clusters,length(clusters),replace=TRUE)
+        smp<-unlist(id.list[match(cluster.boot,clusters)])
+      }   
+      s<-data[smp,]
+	  
+	  if(treat.type=='discrete'){
+        if(length(unique(s[,D]))<length(unique(data[,D]))){
+          return(matrix(NA,length(X.lvls),0))
+        }
+      }
+	  
+	  runflag <- try(output.all <- gen_marg(data=s,Df=TRUE),silent=T)
+	  if(class(runflag)=='try-error'){
+	  #print('wrong')
+	  return(matrix(NA,length(X.lvls),0))
+	  }
+	  output <- output.all$output
+	  
+	  if(predict==TRUE){
+			  ss <- data.demean[smp,]
+			  runflag <- try(output2 <- gen_Ey_linear(data=ss,Y=Y,D=D,X=X,FE=NULL,weights=weights,Z=Z,X.pred=X.pred),silent=T)
+			  if(class(runflag)=='try-error'){
+				return(matrix(NA,length(X.lvls),0))
+			  }
+			  colnames(output2) <- paste0("pred.",colnames(output2))
+			  output <- cbind(output,output2)
+	  }
+	  
+	  if(is.null(diff.values)==FALSE){
+		output.coef <- output.all$coef.inter
+		if(treat.type=='continuous'){
+			output3 <- matrix(output.coef,length(X.lvls),1)
+			colnames(output3) <- 'coef.inter'
+			output <- cbind(output,output3)
+		}
+		if(treat.type=='discrete'){
+		
+			output3 <- matrix(NA,length(X.lvls),0)
+			colnames.output3 <- c()
+			for(char in other.treat){
+				newcoef <- matrix(output.coef[[char]],length(X.lvls),1)
+				output3 <- cbind(output3,newcoef)
+				colnames.output3 <- c(colnames.output3,paste0('coef.inter.',char))
+			}
+			colnames(output3) <- colnames.output3
+			output3 <- as.data.frame(output3)
+			output <- cbind(output,output3)
+		}
+	  }
+	  return(output)
+	}
+	
+	
+	if (parallel==TRUE) {
+	   requireNamespace("doParallel")
+		## require(iterators)
+		maxcores <- detectCores()
+		cores <- min(maxcores, cores)
+		pcl<-makeCluster(cores)  
+		doParallel::registerDoParallel(pcl)
+		cat("Parallel computing with", cores,"cores...\n") 
+
+      suppressWarnings(
+        bootout <- foreach (i=1:nboots, .combine=cbind,
+                            .export=c("one.boot"),.packages=c("lfe"),
+                            .inorder=FALSE) %dopar% {one.boot()}
+      ) 
+	  suppressWarnings(stopCluster(pcl))
+      cat("\r")
+    } 
+    else {
+        bootout<-matrix(NA,length(X.lvls),0)
+        for (i in 1:nboots) {
+          tempdata <- one.boot()
+          if(is.null(tempdata)==FALSE){
+            bootout<- cbind(bootout,tempdata)
+          }
+          if (i%%50==0) cat(i) else cat(".")
+        }
+      cat("\r")
+	}
+	
+	
+	if(dim(bootout)[2]==0){
+		stop("Bootstrap standard error is not stable, try another vartype.")
+	}
+	
+	if(treat.type=='discrete'){
+		marg.list <- list()
+		pred.list <- list()
+		coef.inter.list <- list()
+		for(char in other.treat){
+			marg.list[[char]] <- matrix(NA,nrow=length(X.lvls),ncol=0)
+			coef.inter.list[[char]] <- c()
+		}
+		for(char in all.treat){
+			pred.list[[char]] <- matrix(NA,nrow=length(X.lvls),ncol=0)
+		}
+		
+		if(predict==TRUE){
+			if(is.null(diff.values)==FALSE){
+				kcol <- 2*length(other.treat)+length(all.treat)
+			} else{kcol <- length(other.treat)+length(all.treat)}
+		}
+		if(predict==FALSE){
+			if(is.null(diff.values)==FALSE){
+				kcol <- 2*length(other.treat)
+			} else{kcol <- length(other.treat)}
+		}
+		
+		trueboot <- dim(bootout)[2]/kcol
+		for(k in 0:(trueboot-1)){
+			start <- kcol*k+1
+			end <- kcol*(k+1)
+			bootout_seg <- as.matrix(bootout[,start:end])
+			for(char in other.treat){
+				tempmarg <- marg.list[[char]]
+				if(dim(bootout_seg)[2]>1){
+				tempmarg <- cbind(tempmarg,bootout_seg[,paste0("ME.",char)])
+				} else{tempmarg <- cbind(tempmarg,bootout_seg)}
+				marg.list[[char]] <- tempmarg 
+			}
+			if(predict==TRUE){
+				for(char in all.treat){
+					temppred <- pred.list[[char]]
+					temppred <- cbind(temppred,bootout_seg[,paste0("pred.",char)])
+					pred.list[[char]] <- temppred
+				}
+			}
+			if(is.null(diff.values)==FALSE){
+				for(char in other.treat){
+					temp.coef.inter <- coef.inter.list[[char]]
+					temp.coef.inter <- c(temp.coef.inter,mean(bootout_seg[,paste0('coef.inter.',char)]))
+					coef.inter.list[[char]] <- temp.coef.inter 
+				}
+			}
+		}
+	}
+	
+	if(treat.type=='continuous'){
+		marg.con <- matrix(NA,nrow=length(X.lvls),ncol=0)
+		pred.list <- list()
+		coef.inter <- c()
+		for(char in all.treat){
+			pred.list[[char]] <- matrix(NA,nrow=length(X.lvls),ncol=0)
+		}
+		
+		if(predict==TRUE){
+			if(is.null(diff.values)==FALSE){
+				kcol <- 2+length(all.treat)
+			} else{kcol <- 1+length(all.treat)}	
+		}
+		if(predict==FALSE){
+			if(is.null(diff.values)==FALSE){
+				kcol <- 2
+			} else{kcol <- 1}	
+		}
+
+		trueboot <- dim(bootout)[2]/kcol
+
+		for(k in 0:(trueboot-1)){
+			start <- kcol*k+1
+			end <- kcol*(k+1)
+			bootout_seg <- as.matrix(bootout[,start:end])
+			
+			if(dim(bootout_seg)[2]>1){
+				marg.con <- cbind(marg.con,bootout_seg[,'ME'])
+			} else{marg.con <- cbind(marg.con,bootout_seg)}
+			
+			if(predict==TRUE){
+				for(char in all.treat){
+					temppred <- pred.list[[char]]
+					temppred <- cbind(temppred,bootout_seg[,paste0("pred.",char)])
+					pred.list[[char]] <- temppred
+				}
+			}
+			
+			if(is.null(diff.values)==FALSE){
+					coef.inter <- c(coef.inter,mean(bootout_seg[,'coef.inter']))
+			}
+		}
+	}
+	
+
+	if(is.null(diff.values)==FALSE){
+		if(length(diff.values)==2){
+			x.diff.all <- diff.values[2]-diff.values[1]
+		}
+		
+		if(length(diff.values)==3){
+			x.diff.all <- c(diff.values[2]-diff.values[1],diff.values[3]-diff.values[2],diff.values[3]-diff.values[1])
+		}
+		
+		if(treat.type=='continuous'){
+		diff.table.start <- matrix(0,nrow=0,ncol=6)
+		colnames(diff.table.start) <- c("Diff", "Std.Err.", "z-score", "p-value", "CI_lower(95%)", "CI_upper(95%)")
+		for(x.diff in x.diff.all){
+			difference <- coef.inter.T*x.diff
+			difference.sd <- abs(x.diff)*sqrt(var(coef.inter))
+			difference.z <- difference/difference.sd
+			difference.pvalue2sided=2*pnorm(-abs(difference.z))
+			difference_interval<- quantile(coef.inter,c(0.025,0.975))*x.diff
+			difference.lbound <- difference_interval[1]
+			difference.ubound <- difference_interval[2]
+			diff.table <- round(c(difference,difference.sd,difference.z,difference.pvalue2sided,difference.lbound,difference.ubound),3)
+			diff.table.start <- rbind(diff.table.start,diff.table)
+		
+		}
+			rownames(diff.table.start) <- difference.name
+			diff.table.start <- as.data.frame(diff.table.start)
+			for(col.name.table in colnames(diff.table.start)){
+				diff.table.start[,col.name.table] <- sprintf("%.3f", diff.table.start[,col.name.table])
+			}
+			diff.table <- diff.table.start
+		}
+		
+		if(treat.type=='discrete'){
+			diff.table.list <- list()
+			for(char in other.treat){
+				diff.table.start <- matrix(0,nrow=0,ncol=6)
+				colnames(diff.table.start) <- c("Diff", "Std.Err.", "z-score", "p-value", "CI_lower(95%)", "CI_upper(95%)")
+				for(x.diff in x.diff.all){
+					difference <- coef.inter.T[[char]]*x.diff
+					difference.sd <- abs(x.diff)*sqrt(var(coef.inter.list[[char]]))
+					difference.z <- difference/difference.sd
+					difference.pvalue2sided <- 2*pnorm(-abs(difference.z))
+				
+					difference_interval<- quantile(coef.inter.list[[char]],c(0.025,0.975))*x.diff
+					difference.lbound <- difference_interval[1]
+					difference.ubound <- difference_interval[2]
+					diff.table <- round(c(difference,difference.sd,difference.z,difference.pvalue2sided,difference.lbound,difference.ubound),3)
+					diff.table.start <- rbind(diff.table.start,diff.table)
+				}
+				rownames(diff.table.start) <- difference.name
+				diff.table.start <- as.data.frame(diff.table.start)
+				for(col.name.table in colnames(diff.table.start)){
+					diff.table.start[,col.name.table] <- sprintf("%.3f", diff.table.start[,col.name.table])
+				}
+				diff.table.list[[other.treat.origin[char]]] <- diff.table.start
+			}
+			diff.table <- diff.table.list
+		}
+	} else{diff.table <- NULL}
+	
+	CI.lvl <- c((1-0.95)/2, (1-(1-0.95)/2))
+	if(treat.type=='discrete'){
+		est.lin <- list()
+		est.matrix <- list()
+		for(char in other.treat){
+			marg <- output[,paste0("ME.",char)]
+			marg.ci <- t(apply(marg.list[[char]], 1, quantile, CI.lvl,na.rm=TRUE))
+			se <- apply(marg.list[[char]],1,sd,na.rm=TRUE)
+			lb <- marg.ci[,1]
+			ub <- marg.ci[,2]
+			tempest <- data.frame(X.lvls,marg,se,lb,ub)
+			tempest[,'Treatment']<- rep(other.treat.origin[char],dim(tempest)[1])
+			est.lin[[other.treat.origin[char]]] <- tempest
+			est.matrix[[other.treat.origin[char]]] <- cov(t(marg.list[[char]]))
+		}
+	}
+ 
+	if(treat.type=='continuous'){
+		marg <- output[,"ME"]
+		marg.ci <- t(apply(marg.con, 1, quantile, CI.lvl))
+		se <- apply(marg.con,1,sd)
+		lb <- marg.ci[,1]
+		ub <- marg.ci[,2]
+		tempest <- data.frame(X.lvls,marg,se,lb,ub)
+		est.lin <- tempest
+		est.matrix <- cov(t(marg.con))
+	}
+	
+	
+	if(predict==TRUE){
+	est.predict.linear <- list()
+		for(char in all.treat){
+			fit <- EY_output[,char]
+			pred.ci <- t(apply(pred.list[[char]], 1, quantile, CI.lvl,na.rm=TRUE))
+			se.fit <- apply(pred.list[[char]],1,sd,na.rm=TRUE)
+			lb <- pred.ci[,1]
+			ub <- pred.ci[,2]
+			
+			if(treat.type=='discrete'){
+				
+				est.predict.linear[[all.treat.origin[char]]] <- cbind.data.frame(X = X.pred, EY = fit, 
+                                           SE = se.fit ,Treatment=rep(all.treat.origin[char],length(X.lvls)),
+                                           CI_lower=lb, CI_upper=ub
+                                           )
+										   
+			}						   
+			
+			if(treat.type=='continuous'){
+				est.predict.linear[[char]] <- cbind.data.frame(X = X.pred, EY = fit, 
+                                           SE = se.fit ,Treatment=rep(char,length(X.lvls)),
+                                           CI_lower=lb, CI_upper=ub
+                                           )
+			}
+			}
+		}
+}
+
+  if(TRUE){ # density or histogram
+	if (treat.type=='discrete') { ## discrete D
+    # density
+    if (is.null(weights)==TRUE) {
+      de <- density(data[,X])
+    } else {
+      suppressWarnings(de <- density(data[,X],weights=dataweights))
+    }
+    
+    treat_den <- list()
+    for (char in all.treat) {
+      de.name <- paste0("den.",char)
+      if (is.null(weights)==TRUE) {
+        de.tr <- density(data[data[,D]==char,X])
+      } 
+      else {
+        suppressWarnings(de.tr <- density(data[data[,D]==char,X],
+                                          weights=dataweights[data[,D]==char]))
+      }
+      treat_den[[all.treat.origin[char]]] <- de.tr
+    }
+    
+    # histogram
+    if (is.null(weights)==TRUE) {
+      hist.out<-hist(data[,X],breaks=80,plot=FALSE)
+    } else {
+      suppressWarnings(hist.out<-hist(data[,X],weights,
+                                      breaks=80,plot=FALSE))
+    } 
+    n.hist<-length(hist.out$mids)
+
+    # count the number of treated
+    treat_hist <- list()
+    for (char in all.treat) {
+      count1<-rep(0,n.hist)
+      treat_index<-which(data[,D]==char)
+      for (i in 1:n.hist) {
+        count1[i]<-sum(data[treat_index,X]>=hist.out$breaks[i] &
+                         data[treat_index,X]<hist.out$breaks[(i+1)])
+      }
+      count1[n.hist]<-sum(data[treat_index,X]>=hist.out$breaks[n.hist] &
+                            data[treat_index,X]<=hist.out$breaks[n.hist+1])
+      
+      treat_hist[[all.treat.origin[char]]] <- count1
+    }    
+  }  
+  
+  if (treat.type=='continuous') { ## continuous D
+    if (is.null(weights)==TRUE) {
+      de <- density(data[,X])
+    } else {
+      suppressWarnings(de <- density(data[,X],weights=dataweights))
+    }
+    if (is.null(weights)==TRUE) {
+      hist.out<-hist(data[,X],breaks=80,plot=FALSE)
+    } else {
+      #print("hhh")
+      suppressWarnings(hist.out<-hist(data[,X],weights,
+                                      breaks=80,plot=FALSE))
+    }
+    de.co <- de.tr <- NULL 
+    count1 <- NULL
+  } 
+}
+
+  if(TRUE){ # Tests
+    ## L kurtosis
+	requireNamespace("Lmoments")
+	Lkurtosis <- Lmoments(data[,X],returnobject=TRUE)$ratios[4]
+	tests <- list(
+			treat.type = treat.type,
+			X.Lkurtosis = sprintf(Lkurtosis,fmt = '%#.3f')
+			)
+  }
+  
+  if(TRUE){ # Storage
+	if(treat.type=='discrete'){
+	output<-list(
+    type = "linear",
+    est.lin = est.lin,
+	vcov.matrix = est.matrix,
+    treat.type = treat.type,
+    treatlevels = all.treat.origin,
+	order = order,
+    base = base.origin,
+    Xlabel = Xlabel,
+    Dlabel = Dlabel,
+    Ylabel = Ylabel,
+    de = de,
+    de.tr = treat_den, # density
+    hist.out = hist.out,
+    count.tr = treat_hist,
+    tests = tests,
+	t.test.diffs = diff.table,
+	predict = predict
+  )
+  }
+  
+  if(treat.type=="continuous"){
+    output<-list(
+      type = "linear",
+      est.lin = est.lin,
+	  vcov.matrix = est.matrix,
+      treat.type = treat.type,
+      treatlevels= NULL,
+	  order = NULL,
+      base= NULL,
+      Xlabel = Xlabel,
+      Dlabel = Dlabel,
+      Ylabel = Ylabel,
+      de = de, # density
+      de.tr = de.tr,
+      hist.out = hist.out,
+      count.tr = NULL,
+      tests = tests,
+	  t.test.diffs = diff.table,
+	  predict = predict
+    )
+  }
+  
+  if(predict==TRUE){
+  
+	if(treat.type=='discrete'){
+		labelname <- NULL
+		D.ref <- NULL
+	}
+	if(treat.type=='continuous'){
+		all.treat.origin <- names(D.sample)
+	}
+  
+   output <- c(output,list(est.predict = est.predict.linear,labelname = labelname,all.treat = all.treat.origin,
+						   X=X,Y=Y,D=D,D.ref=D.ref))
+  }
+  
+  }
+  class(output) <- "interflex"
+  
+  # PLOT
+  if (figure==TRUE & pool==FALSE) {
+    
+    class(output) <- "interflex"
+    suppressMessages(
+    graph <- plot.interflex(x = output, CI = CI, xlab = xlab, ylab = ylab, color = color, order = order,
+                        subtitles = subtitles,diff.values = diff.values.plot,
+                        show.subtitles = show.subtitles,
+                        Ylabel = Ylabel, Dlabel = Dlabel, Xlabel = Xlabel, 
+                        main = main, xlim = xlim, ylim = ylim, Xdistr = Xdistr,interval = interval,pool=pool,
+                        file = file, theme.bw = theme.bw, show.grid = show.grid, ncols=ncols,
+                        cex.main = cex.main,cex.sub = cex.sub, cex.axis = cex.axis, cex.lab = cex.lab)  
+    )
+    output<-c(output,list(graph=graph))
+    class(output) <- "interflex"
+  }
+  
+  if(figure==TRUE & pool==TRUE & treat.type=='discrete'){
+    suppressMessages(
+    graph <- plot.interflex(x = output, CI = CI, xlab = xlab, ylab = ylab,order=order,subtitles = subtitles,show.subtitles = show.subtitles,
+                              Ylabel = Ylabel, Dlabel = Dlabel, Xlabel = Xlabel, diff.values = diff.values.plot,
+                              main = main, xlim = xlim, ylim = ylim, Xdistr = Xdistr,interval = interval,pool=pool,color=color,
+                              file = file, theme.bw = theme.bw, show.grid = show.grid,
+                              cex.main = cex.main, cex.axis = cex.axis, cex.lab = cex.lab,legend.title =legend.title)
+    )
+    output <- c(output, list(graph = graph))
+  }
+  class(output) <- "interflex"
+  return(output)
+  }
+  
+
+
+
+
+
+
+
