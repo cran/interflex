@@ -4,33 +4,34 @@
 using namespace Rcpp;
 
 // [[Rcpp::export()]]
-List fastplm(arma::mat data,
-             arma::mat FE,
-             arma::colvec weight,
-             int FEcoefs = 0L 
+List iv_fastplm(arma::mat Y, //outcome
+                arma::mat X, //endogenous variable
+                arma::mat Z, //included exogenous variables
+                arma::mat IV, //excluded exogenous variables
+                arma::mat FE, //fixed effects index
+                arma::colvec weight,
+                int FEcoefs = 0L 
 ){
-  
   // parse data
-  int n = data.n_rows;
+  int n = Y.n_rows;
+  int k_X = X.n_cols;
+  int k_Z = Z.n_cols;
+  int k_IV = IV.n_cols;
+  arma::mat data =  join_rows(Y,X,Z,IV); //for demeaning
   int k = data.n_cols;
   int m = FE.n_cols;
-  int p = k-1; // No. of covariates
+  int p = k-1; 
   arma::mat data_bak = data;
   arma::mat data_wei = data;
   arma::mat data_old = arma::zeros(n, k);
   double diff = 100;
-  
+
   // declare variables
   arma::colvec y;  // n*1
-  arma::mat X; // n*p
   arma::colvec resid; // n*1
   arma::colvec e; // n*1 (with fixed effects)
-  arma::colvec coeff; // coefficient (full)
-  //arma::colvec se; // SE (full)
-  arma::colvec coef; // coefficient
-  //arma::colvec stderror; // SE
-  //int df; // degrees of freedom
-  //double sig2; // sigma2
+  arma::mat coeff; // coefficient (full)
+  arma::mat coef; // coefficient
   double mu = 0; // grand mean
   arma::colvec LHS; // group means 
   arma::mat W; // big weighting matrix to calculate fixed effects
@@ -39,7 +40,7 @@ List fastplm(arma::mat data,
   arma::colvec FEindex;
   std::map<std::string,int> FEindex_map;
   
-  /* count total number of groups (loss of degrees of freedom) */
+
   arma::mat FEvalues;  
   for(int ii=0; ii<m; ii++){ // cluster
     arma::colvec fe = arma::unique(FE.col(ii));   
@@ -49,14 +50,11 @@ List fastplm(arma::mat data,
     arma::mat FEvalue = join_rows(gp, fe);
     FEvalues = join_cols(FEvalues, FEvalue);
   }
-  
   int gtot = FEvalues.n_rows;
-  
-  
-  /* FWL-MAP iteration */
+
+
   int niter = 0;
   while ((diff > 1e-5) & (niter<50)) { 
-    
     // demean Y and X
     for(int ii=0; ii<m; ii++){ // cluster
       // weighted data
@@ -106,78 +104,55 @@ List fastplm(arma::mat data,
     data_old = data;
     niter++;
   }
-  
-  
-  /* Estimation */
-  y = data.col(0);  // n*1
-  if (p>0) {
-    X = data.cols(1, p); // n*p
-    //store coefficents and check variation of X
-    coeff =arma::zeros(p,1); //store coefficients
-    // check X variation
-    int cc = p;
-    for(int i=0;i<cc;i++){
-      arma::colvec var =arma::unique(X.col(i));
-      if(var.n_rows==1){ // no variation
-        coeff(i)=arma::datum::nan ;
-        //se(i)=arma::datum::nan ;
-        X.shed_col(i);
-        i=i-1;
-        cc=cc-1;
-      }
-    }
-    // weighted
-    y = y%sqrt(weight);
-    for(int i=0;i<cc;i++){
-      X.col(i)=X.col(i)%sqrt(weight);
-    } 
-    
-    // OLS
-    coef =  solve(X, y);    // fit model y ~ X
-    //arma::colvec coef = (X.t() * X ).i() * X.t() * y ;
-    resid = y - X*coef;    // residuals
-  }
-  else {
-    resid = y;
-  }
 
-  resid = resid/sqrt(weight);
- 
-  // fill in non-NaN coefficients
-  int count=0;
-  //String label = xname(0); 
-  for(int i=0; i<p; i++){
-    if(coeff(i)==0){
-      coeff(i)=coef(count);
-      count=count+1;
+  //weights
+  for(int i=0;i<k;i++){
+      data.col(i)=data.col(i)%sqrt(weight);
+  } 
+
+  //recover Y X Z IV
+  Y = data.col(0);  // n*1
+  X = data.cols(1,k_X); //n*k_X
+  if(k_Z>0){
+    Z = data.cols(k_X+1,k_X+k_Z); //n*k_Z  
+  }
+  IV = data.cols(k_X+k_Z+1,k_X+k_Z+k_IV); //n*k_IV
+
+  arma::mat Z_full = join_rows(Z,IV);
+  arma::mat X_full = join_rows(X,Z);
+  arma::mat inv_ZZ = inv_sympd(Z_full.t()*Z_full);
+  arma::mat PzX = Z_full*inv_ZZ*(Z_full.t()*X_full);
+  arma::mat PzY = Z_full*inv_ZZ*(Z_full.t()*Y);
+  coeff = arma::solve(PzX,PzY);
+  coef = coeff; 
+  for (int i=0; i<k_X+k_Z; i++) {
+    if (coef(i,0) == arma::datum::nan) {
+        coef(i,0) = 0;
     }
   }
+  arma::mat Y_hat = X_full*coef;
+  arma::colvec residual = (Y - Y_hat).as_col();
+  residual = residual/sqrt(weight);
 
   data = data_bak;
   y = data.col(0);  // n*1
+
+  // grand mean
   mu = arma::sum(y%weight)/arma::sum(weight);
-  if (p > 0) {
-    X = data.cols(1, p); // n*p
-    coef = coeff; 
-    for (int i=0; i<p; i++) {
-      if (coef(i) == arma::datum::nan) {
-        coef(i) = 0;
-      }
-    }
-    arma::mat X_wei = X;
-    for(int i=0;i<p;i++){
-      X_wei.col(i)=X_wei.col(i)%weight;
-    }
-    X_wei = arma::sum(X_wei,0)/arma::sum(weight);
-    mu = mu - arma::as_scalar(X_wei * coef);
+  X_full = data.cols(1, k_X+k_Z); //
+  arma::mat X_wei = X_full;
+  for(int i=0;i<k_X+k_Z;i++){
+    X_wei.col(i)=X_wei.col(i)%weight;
   }
+  X_wei = arma::sum(X_wei,0)/arma::sum(weight);
+  mu = mu - arma::as_scalar(X_wei * coef); 
 
   // Calculate fixed effects coefficients
   if (FEcoefs == 1) {
     // residuals (with fixed effects)
     e = y - mu;
     if (p > 0) {
-      e = e - X * coef;
+      e = e - X_full * coef;
     }
     
     arma::colvec LHS(gtot, arma::fill::zeros);
@@ -202,21 +177,21 @@ List fastplm(arma::mat data,
         LHS(index1) = LHS(index1) + e(i)*sub_weight;
         for(int k=0;k<m;k++) {
           int index2 = FEindex(k);
-          W(index1, index2) = W(index1, index2) + sub_weight;
+          W(index1, index2) = W(index1, index2) + 1*sub_weight;
         }
       }
     }
     alphas = arma::solve(W,LHS);
     FEvalues = join_rows(FEvalues, alphas);
   }
-  
+
   // storage
   List output;
   if (p > 0) {
-    output["coefficients"] = coeff;
+    output["coefficients"] = coef;
     //output["stderr"] = se;
   }
-  output["residuals"] = resid;
+  output["residuals"] = residual;
   output["niter"] = niter;
   output["mu"] = mu ;
   if (FEcoefs == 1) {
@@ -224,5 +199,5 @@ List fastplm(arma::mat data,
     output["FEvalues"] = FEvalues;
   }
   return(output); 
-  
+
 }

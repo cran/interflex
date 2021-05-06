@@ -1,14 +1,15 @@
 
 \name{interflex-internal}
-\alias{coefs.new}
-\alias{crossvalidate.new}
-\alias{inter.plot.pool}
-\alias{interflex.default}
-\alias{fastplm}
-\alias{fastplm_predict}
-\alias{interflex_fastplm}
-\alias{interflex_fastplm_predict}
+\alias{interflex.plot.pool}
+\alias{interflex.linear}
+\alias{interflex.binning}
+\alias{interflex.kernel}
+\alias{interflex.gam}
+\alias{interflex.raw}
 \alias{vcovCluster} 
+\alias{fastplm}
+\alias{iv_fastplm}
+\alias{createFolds}
 \title{Internal Interflex Functions}
 \description{
  Internal Interflex functions
