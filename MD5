@@ -1,8 +1,8 @@
-ef8b67056619aac72a0c137898aa2e2e *DESCRIPTION
+5116085a94079d45cbb4fd5fa2bdb6bf *DESCRIPTION
 c39ca42f1b7e47d897b77c71230e0591 *LICENSE
 6beb1e5b747e0124b449c2fdba595001 *NAMESPACE
 55eb35a4986d881c62b50cc6f539e545 *R/RcppExports.R
-35d7b4411522833f78e2ed3ae319b20a *R/binning.R
+b993427a67ef877f0df00e58d8a5c875 *R/binning.R
 06c255e532432670024563f8118c137d *R/gam.R
 bdfad7f04e62f277eaeb111cb069d09a *R/inter_test.R
 a1d19e844b2246e50b944f5b71d2ff63 *R/interflex.R
@@ -15,7 +15,7 @@ c5582820d9a8d02424aa6ba7b8015660 *R/kernel.R
 bdfad7f04e62f277eaeb111cb069d09a *R/ttest.R
 3cc21fd5ece44f6f656b62140cd2fbd1 *R/vcluster.R
 d57a58670c2e7d9d62d5f9a420036e73 *R/zzz.r
-fd19ca4ad3339ebe4b6479b32fcbcfca *README.md
+0382bbccb9e92b5a9a4b9bbc852bed58 *README.md
 dcc447d4f28ce6c971f910c9d272abcd *data/interflex.RData
 0a4de6d5ba78ba8cd171e5c22571477b *man/inter_test.Rd
 012be4892bc92b67e6c300e0d47558fc *man/interflex-internal.Rd
